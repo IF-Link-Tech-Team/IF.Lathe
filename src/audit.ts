@@ -436,7 +436,7 @@ export async function explainFailure(db: DB, runId: string, fetchImpl: typeof fe
       "_仅供参考，以日志为准。_",
     ].join("\n");
     done("done", markdown, { input: result.inputTokens, output: result.outputTokens });
-    await reportRunStatus(db, runId, fetchImpl);
+    await reportRunStatus(db, runId, fetchImpl, { annotate: false });
     return "explained";
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

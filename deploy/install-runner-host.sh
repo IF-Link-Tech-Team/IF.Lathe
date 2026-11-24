@@ -114,6 +114,31 @@ if [ -f "$WINDOWS_ROOT/ws2025-eval.iso" ]; then
   command -v genisoimage >/dev/null || { echo "找不到 genisoimage（Windows job VM 需要）" >&2; exit 1; }
   IFLINK_CI_WINDOWS_ROOT="$WINDOWS_ROOT" "$LATHE/deploy/build-windows-image.sh" "$LATHE"
   set_env_key "$RUNNER_ENV" IFLINK_CI_WINDOWS_IMAGE "$WINDOWS_ROOT/images/current"
+  # The evaluation licence runs 180 days from the build: a weekly check
+  # rebuilds the image once it is 150 days old.
+  cat > "$UNIT_DIR/iflink-ci-windows-image.service" <<EOF
+[Unit]
+Description=IF ecosystem CI Windows job image (rebuilt before its evaluation licence ends)
+
+[Service]
+Type=oneshot
+Environment=IFLINK_CI_WINDOWS_ROOT=$WINDOWS_ROOT
+ExecStart=/bin/bash "$LATHE/deploy/build-windows-image.sh" "$LATHE"
+Nice=10
+EOF
+  cat > "$UNIT_DIR/iflink-ci-windows-image.timer" <<EOF
+[Unit]
+Description=IF ecosystem CI Windows job image check, weekly
+
+[Timer]
+OnCalendar=Sun 04:17 UTC
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target
+EOF
+  WINDOWS_TIMER=1
   labels=$(awk -F= '$1 == "IFLINK_CI_LABELS" {print $2}' "$RUNNER_ENV")
   case ",$labels," in
     *,vm-windows,*) ;;
@@ -350,6 +375,7 @@ for i in $(seq 1 "$RUNNERS"); do
   systemctl restart "iflink-ci-runner@$i.service"
 done
 systemctl enable --now iflink-ci-maven-cache.service iflink-ci-registry-cache.service
+[ "${WINDOWS_TIMER:-0}" = 1 ] && systemctl enable --now iflink-ci-windows-image.timer
 systemctl restart iflink-ci-maven-cache.service iflink-ci-registry-cache.service
 sleep 2
 systemctl --no-pager --lines=5 status "iflink-ci-runner@1.service" || true

@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Builds the Windows CI job image (images/windows): an unattended install of
 # the Windows Server 2025 evaluation ISO in a KVM guest, provisioned by
-# setup.ps1, installed as $IMAGES/<tag>/root.qcow2 with current pointing at
-# it. The tag hashes the recipe, the ISO and the pinned installers, so an
-# unchanged definition is not rebuilt; older images are removed (each is
-# about 7 GB, and a running VM keeps its open file). The evaluation licence runs 180 days
-# from the build; rebuilding starts it again.
+# setup.ps1, installed as $IMAGES/<hash>-<date>/root.qcow2 with current
+# pointing at it. The hash covers the recipe, the ISO and the pinned
+# installers, so an unchanged definition is not rebuilt; older images are
+# removed (each is about 7 GB, and a running VM keeps its open file).
+# The evaluation licence runs 180 days from the build: an image older than
+# IFLINK_CI_WINDOWS_MAX_AGE_DAYS (150) is rebuilt, which starts it again
+# (iflink-ci-windows-image.timer runs this weekly).
 #
 #   sudo ./deploy/build-windows-image.sh [IF.Lathe dir]
 #
@@ -18,6 +20,7 @@ ROOT=${IFLINK_CI_WINDOWS_ROOT:-/var/lib/iflink-ci-vm/windows}
 ISO=${IFLINK_CI_WINDOWS_ISO:-$ROOT/ws2025-eval.iso}
 IMAGES="$ROOT/images"
 BUILD_MINUTES=${IFLINK_CI_WINDOWS_BUILD_MINUTES:-120}
+MAX_AGE_DAYS=${IFLINK_CI_WINDOWS_MAX_AGE_DAYS:-150}
 
 # name|url|sha256
 DOWNLOADS="
@@ -29,8 +32,17 @@ node-win-x64.zip|https://nodejs.org/dist/v24.22.0/node-v24.22.0-win-x64.zip|f968
 
 [ -f "$ISO" ] || { echo "缺少 Windows ISO：$ISO" >&2; exit 1; }
 iso_sum=$(cat "$ISO.sha256" 2>/dev/null || sha256sum "$ISO" | cut -c1-64 | tee "$ISO.sha256")
-tag=$({ cd "$SRC" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum; echo "$iso_sum"; echo "$DOWNLOADS"; } | sha256sum | cut -c1-16)
+hash=$({ cd "$SRC" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum; echo "$iso_sum"; echo "$DOWNLOADS"; } | sha256sum | cut -c1-16)
 install -d -m 755 "$ROOT" "$IMAGES"
+
+# The newest image of this recipe still inside its licence window, if any
+# (images of earlier installs are named by the hash alone).
+existing=$(find "$IMAGES" -mindepth 2 -maxdepth 2 -name root.qcow2 -path "$IMAGES/$hash*" ! -path '*.part/*' -mtime -"$MAX_AGE_DAYS" -printf '%T@ %h\n' | sort -rn | head -1 | cut -d' ' -f2)
+if [ -n "$existing" ]; then
+  tag=$(basename "$existing")
+else
+  tag="$hash-$(date -u +%Y%m%d)"
+fi
 
 if [ ! -f "$IMAGES/$tag/root.qcow2" ]; then
   echo "building Windows CI image $tag"

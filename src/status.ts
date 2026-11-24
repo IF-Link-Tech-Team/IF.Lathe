@@ -52,7 +52,12 @@ let checksForbiddenUntil = 0;
  * deployments. Best-effort: false when there is no App, the repo is not on
  * GitHub, or GitHub refuses.
  */
-export async function reportRunStatus(db: DB, runId: string, fetchImpl: typeof fetch = fetch): Promise<boolean> {
+/**
+ * `annotate: false` leaves the log annotations out: GitHub adds the
+ * annotations of every update to the check run's, so a later update of a
+ * completed run (the AI failure note) would repeat them.
+ */
+export async function reportRunStatus(db: DB, runId: string, fetchImpl: typeof fetch = fetch, options: { annotate?: boolean } = {}): Promise<boolean> {
   const run = db
     .prepare(
       `SELECT r.id, r.status, r.commit_sha, r.error, r.trigger, r.ref, r.created_at, r.finished_at, r.check_run_id, r.github_deployment_id,
@@ -74,7 +79,7 @@ export async function reportRunStatus(db: DB, runId: string, fetchImpl: typeof f
   if (config.environment && run.trigger !== "pull_request") await reportDeployment(db, run, config.environment, github, repo, fetchImpl);
 
   if (Date.now() >= checksForbiddenUntil) {
-    const checked = await reportCheckRun(db, run, { github, repo, context, detailsUrl }, fetchImpl);
+    const checked = await reportCheckRun(db, run, { github, repo, context, detailsUrl, annotate: options.annotate !== false }, fetchImpl);
     if (checked !== "forbidden") return checked;
     checksForbiddenUntil = Date.now() + 10 * 60_000;
   }
@@ -93,7 +98,7 @@ export function resetChecksFallback(): void {
 async function reportCheckRun(
   db: DB,
   run: any,
-  target: { github: { app: GithubCredentials; installationId: string }; repo: string; context: string; detailsUrl?: string },
+  target: { github: { app: GithubCredentials; installationId: string }; repo: string; context: string; detailsUrl?: string; annotate: boolean },
   fetchImpl: typeof fetch,
 ): Promise<boolean | "forbidden"> {
   const { github, repo } = target;
@@ -106,7 +111,7 @@ async function reportCheckRun(
   } else if (checkRunId === "creating") {
     return true;
   }
-  const body = checkRunBody(db, run, target.context, target.detailsUrl, !checkRunId);
+  const body = checkRunBody(db, run, target.context, target.detailsUrl, !checkRunId, target.annotate);
   const result = await upsertCheckRun(github.app, github.installationId, repo, checkRunId === "creating" ? "" : checkRunId, body, fetchImpl);
   if (!result.ok) {
     if (!checkRunId) db.prepare("UPDATE ci_runs SET check_run_id = '' WHERE id = ? AND check_run_id = 'creating'").run(run.id);
@@ -121,7 +126,7 @@ async function reportCheckRun(
   return true;
 }
 
-function checkRunBody(db: DB, run: any, name: string, detailsUrl: string | undefined, create: boolean): CheckRunBody {
+function checkRunBody(db: DB, run: any, name: string, detailsUrl: string | undefined, create: boolean, annotate: boolean): CheckRunBody {
   const job = db.prepare("SELECT status, steps_json, error, log, started_at FROM ci_jobs WHERE run_id = ? ORDER BY created_at DESC LIMIT 1").get(run.id) as any;
   const common: CheckRunBody = {
     status: "queued",
@@ -155,7 +160,7 @@ function checkRunBody(db: DB, run: any, name: string, detailsUrl: string | undef
         .join("\n\n")
         .slice(0, 60_000),
       text: log ? "```\n" + tailChars(log, 60_000) + "\n```" : undefined,
-      annotations: conclusion === "success" ? [] : logAnnotations(log),
+      annotations: conclusion === "success" || !annotate ? [] : logAnnotations(log),
     },
   };
 }
@@ -194,13 +199,15 @@ export function logAnnotations(log: string): CheckAnnotation[] {
   const add = (rawPath: string, line: number, level: "failure" | "warning", message: string) => {
     const path = repoPath(rawPath);
     if (!path || !Number.isFinite(line) || line < 1) return;
+    message = message.trim();
     const key = `${path}:${line}:${message}`;
     if (seen.has(key) || out.length >= 50) return;
     seen.add(key);
-    out.push({ path, start_line: line, end_line: line, annotation_level: level, message: message.trim().slice(0, 1000) });
+    out.push({ path, start_line: line, end_line: line, annotation_level: level, message: message.slice(0, 1000) });
   };
   let eslintFile = "";
-  for (const line of log.split("\n")) {
+  for (const raw of log.split("\n")) {
+    const line = raw.replace(/\r$/, "");
     let m: RegExpExecArray | null;
     if ((m = /^(\S+\.(?:[cm]?[jt]sx?|vue|svelte))\((\d+),\d+\): (error|warning) (.+)$/.exec(line))) add(m[1], Number(m[2]), m[3] === "error" ? "failure" : "warning", m[4]);
     else if ((m = /^([ew]): file:\/\/(\S+?):(\d+):\d+ (.+)$/.exec(line))) add(m[2], Number(m[3]), m[1] === "e" ? "failure" : "warning", m[4]);
