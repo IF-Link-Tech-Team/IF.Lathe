@@ -17,6 +17,7 @@
  *   lathe secret list
  *   lathe github-app set --app-id N --installation N --key app.pem
  *   lathe watch                         one watcher pass
+ *   lathe health [--optional-runner N]  the CI's own health as JSON (exit 1 if a check fails)
  *
  * Environment: LATHE_DB (default ./data/lathe.db), LATHE_SECRET_KEY (vault
  * key, 16+ characters), LATHE_LISTEN (default 127.0.0.2:4311),
@@ -33,6 +34,7 @@ import { repoFullName } from "../src/github.ts";
 import { createLatheServer, startLoops } from "../src/server.ts";
 import { ensureProject, listSecrets, openLathe, setGithubApp, setSecret } from "../src/standalone.ts";
 import { watchOnce } from "../src/watch.ts";
+import { ciHealth } from "../src/health.ts";
 
 const args = process.argv.slice(2);
 const flag = (name, fallback) => {
@@ -165,7 +167,14 @@ switch (command) {
     await watchOnce(db, { dryRun: args.includes("--dry-run"), cacheDir: join(dirname(dbPath), "watch-cache") });
     break;
   }
+  case "health": {
+    const optional = args.flatMap((a, i) => (a === "--optional-runner" ? [args[i + 1]] : []));
+    const report = ciHealth(db, { dataDir: dirname(dbPath), optionalRunners: optional });
+    console.log(JSON.stringify(report, null, 2));
+    process.exitCode = report.ok ? 0 : 1;
+    break;
+  }
   default:
-    die("用法：lathe serve | pipelines apply|list | run | runs | logs | runner add|labels | secret set|list | github-app set | watch");
+    die("用法：lathe serve | pipelines apply|list | run | runs | logs | runner add|labels | secret set|list | github-app set | watch | health");
 }
 if (command !== "serve") db.close();

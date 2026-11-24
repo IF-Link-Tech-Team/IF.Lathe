@@ -22,6 +22,7 @@ import { parsePipelineConfig, pipelineEvents, recordSkippedRun, skipsCi, startRu
 import { openPullRequests, prMayRun, repoFullName } from "./github.ts";
 import { auditedRepo, auditPullRequest, type AuditTarget } from "./audit.ts";
 import { hooks } from "./hooks.ts";
+import { setState } from "./health.ts";
 import { reportRunStatus } from "./status.ts";
 import type { DB } from "./util.ts";
 
@@ -37,7 +38,15 @@ export interface WatchOptions {
 export async function watchOnce(db: DB, options: WatchOptions): Promise<{ pipelines: number; started: string[] }> {
   const dryRun = options.dryRun === true;
   const log = options.log ?? ((line) => console.log(line));
-  const warn = options.warn ?? ((line) => console.error(line));
+  // Warnings are counted for the health report (ciHealth).
+  const printWarn = options.warn ?? ((line) => console.error(line));
+  let warnings = 0;
+  let lastWarning = "";
+  const warn = (line: string) => {
+    warnings += 1;
+    lastWarning = line;
+    printWarn(line);
+  };
   const CACHE = options.cacheDir;
   // Head commit messages, fetched once per repository and commit into a small
   // bare cache (depth 1, no checkout) with the same keys as ls-remote.
@@ -220,5 +229,9 @@ export async function watchOnce(db: DB, options: WatchOptions): Promise<{ pipeli
     }
   }
   log(`[ci-watch] ${pipelines.length} pipeline(s), ${startedRuns.length} run(s) started`);
+  if (!dryRun) {
+    setState(db, "watch_last_pass", `${pipelines.length} pipeline(s), ${startedRuns.length} run(s) started, ${warnings} warning(s)`);
+    if (lastWarning) setState(db, "watch_last_warning", lastWarning.slice(0, 500));
+  }
   return { pipelines: pipelines.length, started: startedRuns };
 }

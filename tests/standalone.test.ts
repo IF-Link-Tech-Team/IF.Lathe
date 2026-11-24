@@ -14,6 +14,7 @@ import { claimJob, registerRunner, runDetail, startRun, upsertPipeline } from ".
 import { parseSchedule } from "../src/cron.ts";
 import { hooks } from "../src/hooks.ts";
 import { claimAndReport } from "../src/protocol.ts";
+import { ciHealth, setState } from "../src/health.ts";
 import { createLatheServer } from "../src/server.ts";
 import { ensureProject, listSecrets, openLathe, resolveSecret, seal, setGithubApp, setSecret, unseal } from "../src/standalone.ts";
 
@@ -199,4 +200,37 @@ test("checkout.repos: a trusted run gets a token that reads only those repositor
   assert.ok(rules.every(([key]) => key === "url.https://x-access-token:ghs_scoped_token@github.com/acme/dep-one.insteadOf"));
   assert.deepEqual(rules.map(([, v]) => v), ["https://github.com/acme/dep-one", "git@github.com:acme/dep-one", "ssh://git@github.com/acme/dep-one", "git@gh-dep-one:acme/dep-one"]);
   assert.deepEqual(gitCredentialEnv("", ["acme/dep-one"]), {});
+});
+
+test("health: a stale watcher, a silent runner and an old queued job fail; a sleeping workstation only warns", () => {
+  const project = ensureProject(db);
+  const now = new Date("2030-01-01T12:00:00Z");
+  db.prepare("UPDATE ci_runners SET status = 'revoked'").run();
+  db.prepare("UPDATE ci_jobs SET status = 'cancelled' WHERE status IN ('queued', 'running')").run();
+  registerRunner(db, { name: "build", labels: ["vm"] });
+  registerRunner(db, { name: "laptop", labels: ["vm-macos"] });
+  db.prepare("UPDATE ci_runners SET last_seen_at = ? WHERE name = 'build'").run("2030-01-01T11:59:40Z");
+  db.prepare("UPDATE ci_runners SET last_seen_at = ? WHERE name = 'laptop'").run("2030-01-01T09:00:00Z");
+  setState(db, "watch_last_pass", "3 pipeline(s), 0 run(s) started, 0 warning(s)");
+  db.prepare("UPDATE lathe_state SET updated_at = ? WHERE key = 'watch_last_pass'").run("2030-01-01T11:58:00Z");
+  const quiet = upsertPipeline(db, project.id, { name: "repo/health", repo: origin, config: { steps: [{ run: "true" }] } });
+
+  const healthy = ciHealth(db, { dataDir: root, optionalRunners: ["laptop"], minFreeBytes: 1, now });
+  const by = (r: any, name: string) => r.checks.find((c: any) => c.name === name);
+  assert.equal(by(healthy, "ci.watcher").ok, true);
+  assert.equal(by(healthy, "ci.runner.build").ok, true);
+  assert.deepEqual([by(healthy, "ci.runner.laptop").ok, by(healthy, "ci.runner.laptop").severity], [false, "warning"]);
+  assert.equal(by(healthy, "ci.queue").ok, true);
+  assert.equal(by(healthy, "ci.disk").ok, true);
+
+  db.prepare("UPDATE lathe_state SET updated_at = ? WHERE key = 'watch_last_pass'").run("2030-01-01T11:30:00Z");
+  startRun(db, quiet.id, { trigger: "manual" });
+  db.prepare("UPDATE ci_jobs SET created_at = ? WHERE status = 'queued'").run("2030-01-01T10:00:00Z");
+  const broken = ciHealth(db, { dataDir: root, minFreeBytes: Number.MAX_SAFE_INTEGER, offsiteMarker: join(root, "missing"), now });
+  assert.equal(broken.ok, false);
+  assert.deepEqual(
+    broken.checks.filter((c: any) => !c.ok).map((c: any) => `${c.name}:${c.severity}`).sort(),
+    ["ci.disk:critical", "ci.offsite_backup:critical", "ci.queue:warning", "ci.runner.laptop:critical", "ci.watcher:critical"],
+  );
+  db.prepare("UPDATE ci_jobs SET status = 'cancelled' WHERE status = 'queued'").run();
 });

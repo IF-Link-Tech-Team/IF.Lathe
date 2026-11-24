@@ -12,3 +12,4 @@ export { claimAndReport, finishAndReport, finishBody } from "./protocol.ts";
 export { configureLathe, hooks, type LatheHooks } from "./hooks.ts";
 export { parseSchedule } from "./cron.ts";
 export { LatheError, type DB } from "./util.ts";
+export { ciHealth, setState, type HealthCheck, type HealthOptions } from "./health.ts";
