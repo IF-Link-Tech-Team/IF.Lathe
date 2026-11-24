@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { parseSchedule } from "./cron.ts";
 import { AUDIT_SCHEMA } from "./audit.ts";
 import { STATE_SCHEMA } from "./health.ts";
+import { RERUN_SCHEMA } from "./rerun.ts";
 import { hooks } from "./hooks.ts";
 import { assert, fail, id, nowIso, type DB } from "./util.ts";
 
@@ -60,6 +61,7 @@ export function migrateCi(db: DB): void {
   db.exec(CI_SCHEMA);
   db.exec(AUDIT_SCHEMA);
   db.exec(STATE_SCHEMA);
+  db.exec(RERUN_SCHEMA);
   for (const [table, column, ddl] of CI_COLUMN_MIGRATIONS) {
     const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
     if (cols.length > 0 && !cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);

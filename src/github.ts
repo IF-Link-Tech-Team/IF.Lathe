@@ -144,6 +144,8 @@ export interface OpenPullRequest {
   /** GitHub's author_association: OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR, FIRST_TIME_CONTRIBUTOR, FIRST_TIMER, NONE. */
   association: string;
   labels: string[];
+  /** The PR author's login. */
+  author: string;
 }
 
 export async function openPullRequests(app: GithubCredentials, installationId: string, repo: string, fetchImpl: typeof fetch = fetch): Promise<OpenPullRequest[]> {
@@ -158,6 +160,7 @@ export async function openPullRequests(app: GithubCredentials, installationId: s
         fork: (pr.head?.repo?.full_name ?? "") !== (pr.base?.repo?.full_name ?? repo),
         association: String(pr.author_association ?? "NONE"),
         labels: Array.isArray(pr.labels) ? pr.labels.map((l: any) => String(l?.name ?? "")) : [],
+        author: String(pr.user?.login ?? ""),
       });
     }
     if (batch.length < 100) break;

@@ -13,3 +13,4 @@ export { configureLathe, hooks, type LatheHooks } from "./hooks.ts";
 export { parseSchedule } from "./cron.ts";
 export { LatheError, type DB } from "./util.ts";
 export { ciHealth, setState, type HealthCheck, type HealthOptions } from "./health.ts";
+export { handleReruns, parseRerun } from "./rerun.ts";

@@ -27,6 +27,11 @@ pull request and explain failed runs.
   always `neutral`, so it never blocks a merge. Failed runs get a short "likely
   cause / fix" note in their check. Any OpenAI-compatible API works; the
   defaults are DeepSeek's.
+- **`/rerun` on a pull request.** GitHub's Re-run button needs webhooks, so
+  Lathe reads PR comments instead: `/rerun` runs every check of the PR again
+  at its head, `/rerun check ios` only those. Owners, members, collaborators
+  and the PR's author may; the new check runs name who asked, and a refused
+  request gets a neutral `rerun` check saying why.
 - **Caches for VMs.** A Maven Central cache and a Docker Hub pull-through cache
   on the runner host, so a hundred fresh VMs do not each download the same
   artifacts.
@@ -135,7 +140,7 @@ to the runner account with an SSH alias `gh-<name>`.
 |---|---|---|
 | Contents | read | heads of branches |
 | Metadata | read | required |
-| Pull requests | read | open pull requests, their files for review |
+| Pull requests | read | open pull requests, their files for review, `/rerun` comments |
 | Checks | read & write | check runs, AI review |
 | Commit statuses | read & write | fallback when Checks is not granted |
 | Deployments | read & write | `environment` pipelines |
@@ -253,6 +258,7 @@ IF.Lathe 是自托管的 GitHub CI，用来在自己的机器上替代 GitHub Ac
 - **不需要入站流量**：控制面通过 GitHub App 轮询分支和 PR 的 head，不需要公网地址或 webhook。
 - **每个 job 一台全新 VM**：Linux 用 QEMU/KVM，macOS 用 tart 的 APFS 克隆，Windows 用无人值守构建的 Windows Server 镜像；job 结束即删除。
 - **结果回到 GitHub**：每条流水线一个 check run，带步骤表、日志末尾 60 KB 和从编译器/lint 输出解析出的注释（最多 50 条）；App 没有 Checks 权限时退回 commit status。带 `environment` 的流水线同时创建 GitHub Deployment，`code_scanning` 会上传 SARIF。
+- **`/rerun`**：GitHub 自带的 Re-run 按钮要靠 webhook，Lathe 改读 PR 评论：`/rerun` 在当前 head 上重跑这个 PR 的全部检查，`/rerun check ios` 只重跑这几个。仓库的 owner、成员、协作者和 PR 作者可以用；新的 check 会写明是谁要求的，被拒的请求会得到一个说明原因的中性 `rerun` check。
 - **LLM 审查**：开启审查的仓库，每个新的 PR head 会得到一个 “AI review” check：摘要、风险等级和标在改动行上的发现（bug、安全、测试、依赖更新）。结论恒为 `neutral`，不会阻塞合并。失败的运行会在 check 里追加“可能原因 / 修复建议”。兼容任何 OpenAI 格式的 API，默认使用 DeepSeek。
 - **VM 用的缓存**：runner 主机上有 Maven Central 缓存和 Docker Hub 拉取缓存。
 

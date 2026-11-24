@@ -60,7 +60,7 @@ let checksForbiddenUntil = 0;
 export async function reportRunStatus(db: DB, runId: string, fetchImpl: typeof fetch = fetch, options: { annotate?: boolean } = {}): Promise<boolean> {
   const run = db
     .prepare(
-      `SELECT r.id, r.status, r.commit_sha, r.error, r.trigger, r.ref, r.created_at, r.finished_at, r.check_run_id, r.github_deployment_id,
+      `SELECT r.id, r.status, r.commit_sha, r.error, r.trigger, r.ref, r.created_by, r.created_at, r.finished_at, r.check_run_id, r.github_deployment_id,
               p.name, p.repo, p.config_json, pr.workspace_id
          FROM ci_runs r JOIN ci_pipelines p ON p.id = r.pipeline_id JOIN projects pr ON pr.id = r.project_id
         WHERE r.id = ?`,
@@ -167,7 +167,8 @@ function checkRunBody(db: DB, run: any, name: string, detailsUrl: string | undef
 
 function runHeader(run: any): string {
   const where = run.trigger === "pull_request" ? `PR ${String(run.ref).replace(/^refs\/pull\/(\d+)\/.*$/, "#$1")}` : run.ref || "默认分支";
-  return `${hooks.name} · ${run.trigger} · ${where} · \`${String(run.commit_sha).slice(0, 7)}\` · 运行 \`${run.id}\``;
+  const by = String(run.created_by ?? "").startsWith("rerun:") ? ` · @${String(run.created_by).slice(6)} 的 /rerun` : "";
+  return `${hooks.name} · ${run.trigger} · ${where}${by} · \`${String(run.commit_sha).slice(0, 7)}\` · 运行 \`${run.id}\``;
 }
 
 function stepTable(steps: { name: string; status: string; ms?: number }[]): string {

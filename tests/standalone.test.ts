@@ -15,6 +15,7 @@ import { parseSchedule } from "../src/cron.ts";
 import { hooks } from "../src/hooks.ts";
 import { claimAndReport } from "../src/protocol.ts";
 import { ciHealth, setState } from "../src/health.ts";
+import { handleReruns, parseRerun } from "../src/rerun.ts";
 import { createLatheServer } from "../src/server.ts";
 import { ensureProject, listSecrets, openLathe, resolveSecret, seal, setGithubApp, setSecret, unseal } from "../src/standalone.ts";
 
@@ -235,4 +236,74 @@ test("health: a stale watcher, a silent runner and an old queued job fail; a sle
     ["ci.disk:critical", "ci.offsite_backup:critical", "ci.queue:warning", "ci.runner.laptop:critical", "ci.watcher.warnings:warning", "ci.watcher:critical"],
   );
   db.prepare("UPDATE ci_jobs SET status = 'cancelled' WHERE status = 'queued'").run();
+});
+
+test("/rerun: maintainers and the PR author rerun checks once per comment; everyone else gets a neutral note", async () => {
+  assert.equal(parseRerun("/rerun"), null);
+  assert.deepEqual(parseRerun("  /rerun check, ios\nthanks"), ["check", "ios"]);
+  assert.equal(parseRerun("/RERUN all"), null);
+  assert.equal(parseRerun("please /rerun"), undefined);
+  assert.equal(parseRerun("/rerunning"), undefined);
+
+  const project = ensureProject(db);
+  const app = hooks.githubApp(db, project.workspace_id)!;
+  const head = "a".repeat(40);
+  const pulls = [
+    { number: 5, head, fork: false, association: "CONTRIBUTOR", labels: [], author: "alice" },
+    { number: 6, head: "b".repeat(40), fork: true, association: "FIRST_TIME_CONTRIBUTOR", labels: [], author: "newbie" },
+  ];
+  let comments: any[] = [];
+  const checkRuns: any[] = [];
+  const fakeGithub = (async (url: string, init: any = {}) => {
+    if (url.endsWith("/access_tokens")) return Response.json({ token: "ghs_rerun", expires_at: new Date(Date.now() + 3_600_000).toISOString() }, { status: 201 });
+    if (url.includes("/issues/comments")) return Response.json(comments);
+    if (url.includes("/check-runs")) {
+      checkRuns.push(JSON.parse(init.body));
+      return Response.json({ id: 1 }, { status: 201 });
+    }
+    return Response.json({ message: "unexpected " + url }, { status: 404 });
+  }) as typeof fetch;
+  const started: { pr: number; names: string[] | null; by: string }[] = [];
+  const target = {
+    github: app,
+    repo: "acme/app",
+    pulls,
+    checks: ["check", "ios"],
+    fetchImpl: fakeGithub,
+    start: (pr: any, names: string[] | null, by: string) => {
+      started.push({ pr: pr.number, names, by });
+      return names ?? ["check", "ios"];
+    },
+  };
+  const comment = (id: number, login: string, association: string, issue: number, body: string, type = "User") => ({
+    id, body, author_association: association, user: { login, type }, issue_url: `https://api.github.com/repos/acme/app/issues/${issue}`,
+    html_url: `https://github.com/acme/app/pull/${issue}#issuecomment-${id}`, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+  });
+
+  // The first pass only sets the starting point.
+  comments = [comment(1, "owner", "OWNER", 5, "/rerun")];
+  assert.deepEqual(await handleReruns(db, target), []);
+  assert.equal(started.length, 0);
+
+  comments = [
+    comment(1, "owner", "OWNER", 5, "/rerun"),
+    comment(2, "alice", "CONTRIBUTOR", 5, "/rerun ios"),
+    comment(3, "mallory", "NONE", 5, "/rerun"),
+    comment(4, "owner", "MEMBER", 5, "/rerun nope"),
+    comment(5, "owner", "OWNER", 99, "/rerun"),
+    comment(6, "dependabot[bot]", "NONE", 5, "/rerun", "Bot"),
+    comment(7, "owner", "OWNER", 6, "/rerun"),
+    comment(8, "owner", "OWNER", 5, "LGTM"),
+  ];
+  const outcomes = await handleReruns(db, target);
+  assert.deepEqual(started, [{ pr: 5, names: null, by: "owner" }, { pr: 5, names: ["ios"], by: "alice" }]);
+  assert.deepEqual(outcomes.map((o) => o.comment), ["1", "2", "3", "4", "7"]);
+  assert.match(outcomes[2].outcome, /mallory 不是仓库成员/);
+  assert.match(outcomes[3].outcome, /没有这些检查：nope/);
+  assert.match(outcomes[4].outcome, /ci-approved/);
+  assert.deepEqual(checkRuns.map((c) => [c.name, c.conclusion, c.head_sha.slice(0, 1)]), [["rerun", "neutral", "a"], ["rerun", "neutral", "a"], ["rerun", "neutral", "b"]]);
+
+  // The same comments again: nothing is done twice.
+  assert.deepEqual(await handleReruns(db, target), []);
+  assert.equal(started.length, 2);
 });

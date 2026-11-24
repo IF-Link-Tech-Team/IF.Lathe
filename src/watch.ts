@@ -23,7 +23,8 @@ import { openPullRequests, prMayRun, repoFullName } from "./github.ts";
 import { auditedRepo, auditPullRequest, type AuditTarget } from "./audit.ts";
 import { hooks } from "./hooks.ts";
 import { setState } from "./health.ts";
-import { reportRunStatus } from "./status.ts";
+import { handleReruns } from "./rerun.ts";
+import { reportRunStatus, statusContext } from "./status.ts";
 import type { DB } from "./util.ts";
 
 export interface WatchOptions {
@@ -99,21 +100,23 @@ export async function watchOnce(db: DB, options: WatchOptions): Promise<{ pipeli
     .map((p: any) => ({ ...p, config: parsePipelineConfig(JSON.parse(p.config_json || "{}")).config }));
 
   const startedRuns: string[] = [];
-  function start(pipeline: any, input: { trigger: string; ref: string; commit: string }, label: string) {
+  // `force` (a /rerun) runs even a [skip ci] head.
+  function start(pipeline: any, input: { trigger: string; ref: string; commit: string }, label: string, opts: { createdBy?: string; force?: boolean } = {}): boolean {
     const message = headMessage(pipeline.repo, input.commit);
-    if (message === null) return;
-    if (skipsCi(message)) {
+    if (message === null) return false;
+    if (skipsCi(message) && !opts.force) {
       if (dryRun) log(`[ci-watch] would skip ${pipeline.name} ${label} ([skip ci])`);
       else recordSkippedRun(db, pipeline.id, { ...input, reason: "提交信息要求跳过 CI（[skip ci]）", createdBy: "ci-watch" });
-      return;
+      return false;
     }
     if (dryRun) {
       log(`[ci-watch] would start ${pipeline.name} ${label}`);
-      return;
+      return false;
     }
-    const run = startRun(db, pipeline.id, { ...input, createdBy: "ci-watch" });
+    const run = startRun(db, pipeline.id, { ...input, createdBy: opts.createdBy ?? "ci-watch" });
     log(`[ci-watch] started ${pipeline.name} ${label} → ${run.run_id}`);
     startedRuns.push(run.run_id);
+    return true;
   }
 
   /* push --------------------------------------------------------------------- */
@@ -155,10 +158,11 @@ export async function watchOnce(db: DB, options: WatchOptions): Promise<{ pipeli
   for (const [repo, group] of byRepo) {
     const fullName = repoFullName(repo);
     let pulls;
+    let github;
     // One repository's failure (GitHub refusing, credentials unreadable) must
     // not stop the others, nor the status reports below.
     try {
-      const github = hooks.githubApp(db, group[0].workspace_id);
+      github = hooks.githubApp(db, group[0].workspace_id);
       if (!fullName || !github) {
         warn(`[ci-watch] ${fullName ?? repo}: no GitHub App installation, PR checks skipped`);
         continue;
@@ -201,6 +205,35 @@ export async function watchOnce(db: DB, options: WatchOptions): Promise<{ pipeli
         }
         start(pipeline, { trigger: "pull_request", ref, commit: pr.head }, `#${pr.number} @ ${pr.head.slice(0, 7)}`);
       }
+    }
+    // /rerun comments, after the new heads above have started.
+    if (dryRun) continue;
+    const checks = [...new Set(group.map((p) => statusContext(p.name, p.config)))];
+    try {
+      await handleReruns(db, {
+        github,
+        repo: fullName,
+        pulls,
+        checks,
+        log,
+        start: (pr, names, by) => {
+          const ref = prRefs.has(`refs/pull/${pr.number}/merge`) ? `refs/pull/${pr.number}/merge` : `refs/pull/${pr.number}/head`;
+          const started: string[] = [];
+          for (const pipeline of group) {
+            const name = statusContext(pipeline.name, pipeline.config);
+            if (names && !names.includes(name)) continue;
+            const busy = db
+              .prepare("SELECT 1 FROM ci_runs WHERE pipeline_id = ? AND trigger = 'pull_request' AND ref LIKE ? AND commit_sha = ? AND status IN ('queued', 'running')")
+              .get(pipeline.id, `refs/pull/${pr.number}/%`, pr.head);
+            if (busy) continue;
+            const label = `#${pr.number} @ ${pr.head.slice(0, 7)} (/rerun by @${by})`;
+            if (start(pipeline, { trigger: "pull_request", ref, commit: pr.head }, label, { createdBy: `rerun:${by}`, force: true })) started.push(name);
+          }
+          return started;
+        },
+      });
+    } catch (err) {
+      warn(`[ci-watch] /rerun ${fullName}: ${err instanceof Error ? err.message : err}`);
     }
   }
 
