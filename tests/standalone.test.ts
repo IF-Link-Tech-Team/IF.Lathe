@@ -219,18 +219,20 @@ test("health: a stale watcher, a silent runner and an old queued job fail; a sle
   const by = (r: any, name: string) => r.checks.find((c: any) => c.name === name);
   assert.equal(by(healthy, "ci.watcher").ok, true);
   assert.equal(by(healthy, "ci.runner.build").ok, true);
-  assert.deepEqual([by(healthy, "ci.runner.laptop").ok, by(healthy, "ci.runner.laptop").severity], [false, "warning"]);
+  assert.deepEqual([by(healthy, "ci.runner.laptop").ok, by(healthy, "ci.runner.laptop").severity], [true, "warning"]);
+  assert.match(by(healthy, "ci.runner.laptop").detail, /offline, optional/);
   assert.equal(by(healthy, "ci.queue").ok, true);
   assert.equal(by(healthy, "ci.disk").ok, true);
 
   db.prepare("UPDATE lathe_state SET updated_at = ? WHERE key = 'watch_last_pass'").run("2030-01-01T11:30:00Z");
+  setState(db, "watch_warning_streak", "3");
   startRun(db, quiet.id, { trigger: "manual" });
   db.prepare("UPDATE ci_jobs SET created_at = ? WHERE status = 'queued'").run("2030-01-01T10:00:00Z");
   const broken = ciHealth(db, { dataDir: root, minFreeBytes: Number.MAX_SAFE_INTEGER, offsiteMarker: join(root, "missing"), now });
   assert.equal(broken.ok, false);
   assert.deepEqual(
     broken.checks.filter((c: any) => !c.ok).map((c: any) => `${c.name}:${c.severity}`).sort(),
-    ["ci.disk:critical", "ci.offsite_backup:critical", "ci.queue:warning", "ci.runner.laptop:critical", "ci.watcher:critical"],
+    ["ci.disk:critical", "ci.offsite_backup:critical", "ci.queue:warning", "ci.runner.laptop:critical", "ci.watcher.warnings:warning", "ci.watcher:critical"],
   );
   db.prepare("UPDATE ci_jobs SET status = 'cancelled' WHERE status = 'queued'").run();
 });

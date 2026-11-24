@@ -49,7 +49,10 @@ export interface HealthOptions {
   runnerMaxSilenceMinutes?: number;
   /** A job queued longer than this fails (60 minutes). */
   queueMaxAgeMinutes?: number;
-  /** Runners whose absence is only a warning (a workstation that sleeps). */
+  /**
+   * Runners that may be offline (a workstation that sleeps): reported, never
+   * failing. Jobs waiting for them still fail the queue check.
+   */
   optionalRunners?: string[];
   /** A file whose modification time marks the last good off-site backup. */
   offsiteMarker?: string;
@@ -72,12 +75,14 @@ export function ciHealth(db: DB, options: HealthOptions): { generated_at: string
     severity: "critical",
     detail: watch ? `last pass ${minutes(watchAge)} min ago (${watch.value})` : "no watcher pass recorded",
   });
-  const warnings = watch ? Number(/(\d+) warning/.exec(watch.value)?.[1] ?? 0) : 0;
+  // One pass with a warning is usually GitHub having a moment; three in a
+  // row (six minutes) is worth a message.
+  const streak = Number(getState(db, "watch_warning_streak")?.value ?? 0);
   checks.push({
     name: "ci.watcher.warnings",
-    ok: warnings === 0,
+    ok: streak < 3,
     severity: "warning",
-    detail: warnings ? `${warnings} warning(s) in the last pass: ${getState(db, "watch_last_warning")?.value ?? ""}`.slice(0, 280) : "none",
+    detail: streak ? `${streak} pass(es) in a row with warnings; last: ${getState(db, "watch_last_warning")?.value ?? ""}`.slice(0, 280) : "none",
   });
 
   const silence = (options.runnerMaxSilenceMinutes ?? 5) * 60_000;
@@ -85,11 +90,12 @@ export function ciHealth(db: DB, options: HealthOptions): { generated_at: string
   const runners = db.prepare("SELECT name, labels, last_seen_at FROM ci_runners WHERE status != 'revoked' ORDER BY name").all() as any[];
   for (const runner of runners) {
     const age = runner.last_seen_at ? now.getTime() - new Date(runner.last_seen_at).getTime() : Infinity;
+    const seen = Number.isFinite(age) ? `last heartbeat ${minutes(age)} min ago, labels ${runner.labels || "-"}` : "never seen";
     checks.push({
       name: `ci.runner.${runner.name}`,
-      ok: age <= silence,
+      ok: age <= silence || optional.has(runner.name),
       severity: optional.has(runner.name) ? "warning" : "critical",
-      detail: Number.isFinite(age) ? `last heartbeat ${minutes(age)} min ago, labels ${runner.labels || "-"}` : "never seen",
+      detail: optional.has(runner.name) && age > silence ? `offline, optional: ${seen}` : seen,
     });
   }
 

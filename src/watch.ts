@@ -232,6 +232,8 @@ export async function watchOnce(db: DB, options: WatchOptions): Promise<{ pipeli
   if (!dryRun) {
     setState(db, "watch_last_pass", `${pipelines.length} pipeline(s), ${startedRuns.length} run(s) started, ${warnings} warning(s)`);
     if (lastWarning) setState(db, "watch_last_warning", lastWarning.slice(0, 500));
+    const streak = (db.prepare("SELECT value FROM lathe_state WHERE key = 'watch_warning_streak'").get() as { value: string } | undefined)?.value;
+    setState(db, "watch_warning_streak", String(warnings ? Number(streak ?? 0) + 1 : 0));
   }
   return { pipelines: pipelines.length, started: startedRuns };
 }
