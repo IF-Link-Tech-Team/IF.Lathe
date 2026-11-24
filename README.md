@@ -267,3 +267,5 @@ IF.Lathe 是自托管的 GitHub CI，用来在自己的机器上替代 GitHub Ac
 安全模型：job 代码视为不可信，只在 VM 里以 root 运行，VM 进程本身在专用账号和 systemd 沙箱里，访问不到内网、主机地址和其他回环服务；密钥只交给可信运行（流水线自己分支上的运行，PR 永远拿不到），首次贡献者的 fork PR 要等维护者加上 `ci-approved` 标签才会运行；日志中的密钥值会被遮盖；LLM 只把 diff 和 PR 文本当数据处理，没有工具，输出按纯文本展示并去掉链接。
 
 许可证：MIT。第三方组件的许可见上文 “Third-party pieces”。
+
+<!-- probe for /rerun; this PR is closed without merging -->
