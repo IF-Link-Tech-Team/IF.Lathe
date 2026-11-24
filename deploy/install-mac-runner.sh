@@ -130,6 +130,12 @@ EOF
 
 for agent in tunnel runner; do
   launchctl bootout "gui/$(id -u)/$LABEL-$agent" 2>/dev/null || true
+  # bootout returns before the agent is gone; bootstrapping it again before
+  # then fails with "Input/output error".
+  for _ in $(seq 1 30); do
+    launchctl print "gui/$(id -u)/$LABEL-$agent" >/dev/null 2>&1 || break
+    sleep 1
+  done
   launchctl bootstrap "gui/$(id -u)" "$AGENTS/$LABEL-$agent.plist"
 done
 sleep 3
