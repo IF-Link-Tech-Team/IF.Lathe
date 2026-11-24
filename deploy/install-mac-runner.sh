@@ -9,6 +9,10 @@
 # LATHE_CONTROL       the tunnel account and host (required).
 # LATHE_CONTROL_ADDR  where the control plane listens for runners there (127.0.0.2:4311).
 # LATHE_LAUNCHD_LABEL prefix of the two LaunchAgents (org.iflink.lathe).
+# LATHE_SOFTNET=0     keep tart's default NAT, from which a VM reaches this
+#                     Mac's LAN. By default jobs use softnet, which only lets
+#                     a VM out to the internet; it is a setuid-root helper, so
+#                     the first install asks for the sudo password once.
 #
 # Expects in $ROOT/secrets (mode 700):
 #   tunnel_ed25519  key of a tunnel-only account on the control plane host,
@@ -58,6 +62,28 @@ if [ "$("$TART" --version 2>/dev/null || true)" != "$TART_VERSION" ]; then
   rm -rf "$tmp"
 fi
 codesign --verify --deep --strict "$ROOT/bin/tart.app"
+
+# softnet (macOS 26+), pinned and checksummed, root-owned with the setuid bit
+# tart requires, in a root-owned directory the runner's PATH starts with.
+SOFTNET_VERSION=0.26.0
+SOFTNET_SHA256=8469759f9cdfaaba52a150b629877985129308461702bc074c3ad7727837db82
+SOFTNET_DIR=/usr/local/libexec/lathe-softnet
+SOFTNET=0
+if [ "${LATHE_SOFTNET:-1}" = 1 ]; then
+  if [ "$(cat "$SOFTNET_DIR/VERSION" 2>/dev/null)" != "$SOFTNET_VERSION" ]; then
+    tmp=$(mktemp -d)
+    curl -fsSL -o "$tmp/softnet.tar.gz" "https://github.com/openai/softnet/releases/download/$SOFTNET_VERSION/softnet.tar.gz"
+    [ "$(shasum -a 256 "$tmp/softnet.tar.gz" | cut -d' ' -f1)" = "$SOFTNET_SHA256" ] || { echo "softnet.tar.gz 校验失败" >&2; exit 1; }
+    tar -xzf "$tmp/softnet.tar.gz" -C "$tmp"
+    echo "softnet 需要 root 所有并带 setuid 位，下面会要 sudo 密码："
+    sudo install -d -o root -g wheel -m 755 "$SOFTNET_DIR"
+    sudo install -o root -g wheel -m 4755 "$(find "$tmp" -type f -name softnet | head -1)" "$SOFTNET_DIR/softnet"
+    echo "$SOFTNET_VERSION" | sudo tee "$SOFTNET_DIR/VERSION" >/dev/null
+    rm -rf "$tmp"
+  fi
+  [ "$(stat -f '%Su %Lp' "$SOFTNET_DIR/softnet")" = "root 4755" ] || { echo "$SOFTNET_DIR/softnet 不是 root 所有的 setuid 程序" >&2; exit 1; }
+  SOFTNET=1
+fi
 
 # The job image (tens of GB on first pull).
 export TART_HOME="$ROOT/tart"
@@ -113,7 +139,8 @@ cat > "$AGENTS/$LABEL-runner.plist" <<EOF
   <key>WorkingDirectory</key><string>$ROOT</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PATH</key><string>$SOFTNET_DIR:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>IFLINK_CI_TART_SOFTNET</key><string>$SOFTNET</string>
     <key>IFLINK_CI_URL</key><string>http://127.0.0.1:$PORT</string>
     <key>IFLINK_CI_LABELS</key><string>vm-macos,vm-only</string>
     <key>IFLINK_CI_WORK</key><string>$ROOT/work</string>

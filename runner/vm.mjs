@@ -432,8 +432,8 @@ async function startTartVm({ jobId, workdir, spec, hooks }) {
     deleteVm();
     return { ok: false, error: `tart set 失败：${sized.output.trim().slice(-500)}` };
   }
-  // Softnet keeps the guest off the host's LAN; it needs a root-owned softnet
-  // binary, so it is opt-in.
+  // Softnet keeps the guest off the host's LAN; install-mac-runner.sh installs
+  // the root-owned setuid softnet it needs and turns this on.
   const net = process.env.IFLINK_CI_TART_SOFTNET === "1" ? ["--net-softnet"] : [];
   const vmProc = spawn(TART, ["run", name, "--no-graphics", "--no-audio", "--no-clipboard", ...net], { stdio: ["ignore", "ignore", "pipe"] });
   let vmError = "";
