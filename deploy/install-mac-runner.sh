@@ -13,6 +13,9 @@
 #                     Mac's LAN. By default jobs use softnet, which only lets
 #                     a VM out to the internet; it is a setuid-root helper, so
 #                     the first install asks for the sudo password once.
+# LATHE_SOFTNET_ALLOW CIDRs softnet should let through anyway, e.g.
+#                     198.18.0.0/15 when a proxy on this Mac answers DNS with
+#                     fake IPs in that range (github.com then resolves there).
 #
 # Expects in $ROOT/secrets (mode 700):
 #   tunnel_ed25519  key of a tunnel-only account on the control plane host,
@@ -81,7 +84,8 @@ if [ "${LATHE_SOFTNET:-1}" = 1 ]; then
     echo "$SOFTNET_VERSION" | sudo tee "$SOFTNET_DIR/VERSION" >/dev/null
     rm -rf "$tmp"
   fi
-  [ "$(stat -f '%Su %Lp' "$SOFTNET_DIR/softnet")" = "root 4755" ] || { echo "$SOFTNET_DIR/softnet 不是 root 所有的 setuid 程序" >&2; exit 1; }
+  # (BSD stat's %Lp leaves out the setuid bit; test -u reads it.)
+  [ -u "$SOFTNET_DIR/softnet" ] && [ "$(stat -f '%Su' "$SOFTNET_DIR/softnet")" = root ] || { echo "$SOFTNET_DIR/softnet 不是 root 所有的 setuid 程序" >&2; exit 1; }
   SOFTNET=1
 fi
 
@@ -141,6 +145,7 @@ cat > "$AGENTS/$LABEL-runner.plist" <<EOF
   <dict>
     <key>PATH</key><string>$SOFTNET_DIR:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>IFLINK_CI_TART_SOFTNET</key><string>$SOFTNET</string>
+    <key>IFLINK_CI_TART_SOFTNET_ALLOW</key><string>${LATHE_SOFTNET_ALLOW:-}</string>
     <key>IFLINK_CI_URL</key><string>http://127.0.0.1:$PORT</string>
     <key>IFLINK_CI_LABELS</key><string>vm-macos,vm-only</string>
     <key>IFLINK_CI_WORK</key><string>$ROOT/work</string>

@@ -434,7 +434,12 @@ async function startTartVm({ jobId, workdir, spec, hooks }) {
   }
   // Softnet keeps the guest off the host's LAN; install-mac-runner.sh installs
   // the root-owned setuid softnet it needs and turns this on.
-  const net = process.env.IFLINK_CI_TART_SOFTNET === "1" ? ["--net-softnet"] : [];
+  // IFLINK_CI_TART_SOFTNET_ALLOW opens CIDRs softnet blocks as non-public,
+  // e.g. a local proxy's fake-IP range (198.18.0.0/15) the host resolves
+  // public names into.
+  const allow = String(process.env.IFLINK_CI_TART_SOFTNET_ALLOW ?? "");
+  const allowArg = /^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}(,\d{1,3}(\.\d{1,3}){3}\/\d{1,2})*$/.test(allow) ? [`--net-softnet-allow=${allow}`] : [];
+  const net = process.env.IFLINK_CI_TART_SOFTNET === "1" ? ["--net-softnet", ...allowArg] : [];
   const vmProc = spawn(TART, ["run", name, "--no-graphics", "--no-audio", "--no-clipboard", ...net], { stdio: ["ignore", "ignore", "pipe"] });
   let vmError = "";
   let exited = null;
