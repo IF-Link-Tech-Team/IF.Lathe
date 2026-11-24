@@ -338,6 +338,9 @@ async function execute(claim, options = {}) {
     // run whose vault lacks one would only fail later, less clearly.
     if (job.missing_secrets?.length) return fail(`凭据库里没有这些键：${job.missing_secrets.join(", ")}`);
     if (job.secrets_withheld) await sendChunk(job.id, "这次运行不可信（PR 或非默认分支），不提供流水线的凭据。\n");
+    // The control plane does not hand a host job to a vm-only runner; this is
+    // the runner's own refusal, should it ever get one.
+    if (!config.vm && LABELS.split(",").map((l) => l.trim()).includes("vm-only")) return fail("这个 runner 只运行 VM 任务（vm-only），不在主机上执行");
     // A requeued job keeps its id: start from an empty directory.
     rmSync(workdir, { recursive: true, force: true });
     // A VM job's tree is cloned beside the VM's own files, then copied in.

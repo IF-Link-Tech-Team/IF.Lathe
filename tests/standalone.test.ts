@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { docAudits, pipelinesFromDoc } from "../src/apply.ts";
-import { registerRunner, runDetail, startRun, upsertPipeline } from "../src/ci.ts";
+import { claimJob, registerRunner, runDetail, startRun, upsertPipeline } from "../src/ci.ts";
 import { parseSchedule } from "../src/cron.ts";
 import { hooks } from "../src/hooks.ts";
 import { createLatheServer } from "../src/server.ts";
@@ -138,4 +138,27 @@ test("command line: runner tokens, secrets from stdin, runs and logs", () => {
   assert.match(runs.stdout, /succeeded\trepo\/check\tmanual/);
   const id = runs.stdout.split("\t")[0];
   assert.match(cli(["logs", id]).stdout, /hello from the repo/);
+});
+
+test("a vm-only runner gets VM jobs and never a job for its host", async () => {
+  // The end-to-end runner (no labels) would take the host job itself.
+  if (runnerProc) {
+    const proc = runnerProc;
+    runnerProc = null;
+    await new Promise((resolve) => {
+      proc.once("exit", resolve);
+      proc.kill();
+    });
+  }
+  const project = ensureProject(db);
+  const host = upsertPipeline(db, project.id, { name: "repo/host", repo: origin, config: { steps: [{ run: "true" }] } });
+  const mac = upsertPipeline(db, project.id, { name: "repo/mac", repo: origin, config: { vm: { os: "macos" }, steps: [{ run: "true" }] } });
+  const hostRun = startRun(db, host.id, { trigger: "manual" });
+  const macRun = startRun(db, mac.id, { trigger: "manual" });
+  const runner = { id: registerRunner(db, { name: "mac", labels: ["vm-macos", "vm-only"] }).id, labels: "vm-macos,vm-only" };
+  const claimed = claimJob(db, runner);
+  assert.equal(claimed?.job.run_id, macRun.run_id);
+  assert.equal(claimJob(db, runner), null);
+  assert.equal(runDetail(db, project.id, hostRun.run_id).status, "queued");
+  db.prepare("UPDATE ci_jobs SET status = 'cancelled' WHERE run_id = ?").run(hostRun.run_id);
 });

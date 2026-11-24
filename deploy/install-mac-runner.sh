@@ -15,7 +15,9 @@
 #                   whose authorized_keys line is restrict,port-forwarding,
 #                   permitopen="127.0.0.2:4311",command="/usr/sbin/nologin"
 #   known_hosts     that host's pinned host key
-#   runner.env      IFLINK_CI_TOKEN=cir_… of a runner registered for vm-macos
+#   runner.env      IFLINK_CI_TOKEN=cir_… of a runner registered with the
+#                   labels vm-macos,vm-only (lathe runner add mac --labels
+#                   vm-macos,vm-only): vm-only keeps jobs without `vm` off it
 # Idempotent: re-running upgrades the runner files and restarts both agents.
 set -euo pipefail
 
@@ -113,7 +115,7 @@ cat > "$AGENTS/$LABEL-runner.plist" <<EOF
   <dict>
     <key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>IFLINK_CI_URL</key><string>http://127.0.0.1:$PORT</string>
-    <key>IFLINK_CI_LABELS</key><string>vm-macos</string>
+    <key>IFLINK_CI_LABELS</key><string>vm-macos,vm-only</string>
     <key>IFLINK_CI_WORK</key><string>$ROOT/work</string>
     <key>IFLINK_CI_TART</key><string>$TART</string>
     <key>IFLINK_CI_TART_IMAGE</key><string>$IMAGE</string>

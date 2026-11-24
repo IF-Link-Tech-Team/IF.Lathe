@@ -577,6 +577,9 @@ export function claimJob(db: DB, runner: { id: string; labels: string }, waitMs 
   return null;
 }
 
+/** The runner label that keeps every job without `vm` off a runner. */
+export const VM_ONLY = "vm-only";
+
 /** The runner label a VM job needs: Linux VMs `vm`, others `vm-<os>`. */
 export function vmLabel(vm: VmConfig): string {
   return !vm.os || vm.os === "linux" ? "vm" : `vm-${vm.os}`;
@@ -593,6 +596,8 @@ function takeJob(db: DB, runner: { id: string; labels: string }) {
     // A VM job needs a runner that can boot that kind of VM.
     const needs = [...(config.needs ?? []), ...(config.vm ? [vmLabel(config.vm)] : [])];
     if (needs.length > 0 && !needs.every((n) => labels.has(n))) continue;
+    // A `vm-only` runner (one on a workstation) never runs a job on its host.
+    if (!config.vm && labels.has(VM_ONLY)) continue;
     if (config.serial && db.prepare("SELECT 1 FROM ci_jobs j JOIN ci_runs r ON r.id = j.run_id WHERE r.pipeline_id = ? AND j.status = 'running'").get(run.pipeline_id)) continue;
     const lease = new Date(Date.now() + LEASE_SECONDS * 1000).toISOString();
     const changed = db

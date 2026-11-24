@@ -113,7 +113,7 @@ One JSON file per repository; `lathe pipelines apply <file|dir>` registers them
 | `on` | `push`, `pull_request`; unset means `["push"]`, `[]` means manual, `after` or schedule only |
 | `after` | pipelines that must have succeeded at the same commit first (outside pull requests) |
 | `vm` | run in a throwaway VM; `os`: `linux` (default), `macos`, `windows` |
-| `needs` | runner labels the job requires |
+| `needs` | runner labels the job requires; a job without `vm` runs on the runner host itself and never goes to a `vm-only` runner |
 | `steps` | `{ name, run, shell?: "sh" \| "bash", allow_failure? }`; Windows steps run in PowerShell 7 |
 | `secrets` | env name → vault key; given only to trusted runs: the pipeline's own branch, never a pull request |
 | `inputs` | env names a manual run may set |
@@ -190,7 +190,11 @@ Runner (`runner.env`): `IFLINK_CI_URL`, `IFLINK_CI_TOKEN`, `IFLINK_CI_LABELS`,
   builds the image unattended (Node 24, Python 3.12 with uv, PowerShell 7, Git)
   and the runners start claiming `vm-windows` jobs.
 - **macOS jobs**: `deploy/install-mac-runner.sh` on a Mac, as the logged-in
-  user (tart needs a GUI session).
+  user (tart needs a GUI session). Register its runner with
+  `--labels vm-macos,vm-only`.
+- **`vm-only`**: a runner with this label is never given a job without `vm`,
+  so nothing runs on its host. Use it for any runner on a machine people work
+  on; without it, a runner also takes jobs that run directly on its host.
 
 ## Embedding
 
