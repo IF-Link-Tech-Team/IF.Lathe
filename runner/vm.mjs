@@ -94,6 +94,30 @@ export function guestCommand(command, env, { timeout = 600, shell = "sh", guest 
 
 const secretsPath = (guest) => guest.secrets ?? `${guest.home}/.ci/secrets.env`;
 
+/**
+ * Git settings (as GIT_CONFIG_* variables) that send a job's clones of its
+ * `checkout.repos` through a read-only token: their https, ssh and
+ * `gh-<name>` alias URLs all become token URLs. Nothing else is rewritten.
+ */
+export function gitCredentialEnv(token, repos) {
+  const rules = [];
+  for (const full of repos ?? []) {
+    const [owner, name] = String(full).split("/");
+    if (!owner || !name) continue;
+    const base = `https://x-access-token:${token}@github.com/${owner}/${name}`;
+    for (const prefix of [`https://github.com/${owner}/${name}`, `git@github.com:${owner}/${name}`, `ssh://git@github.com/${owner}/${name}`, `git@gh-${name}:${owner}/${name}`]) {
+      rules.push([`url.${base}.insteadOf`, prefix]);
+    }
+  }
+  if (!token || rules.length === 0) return {};
+  const env = { GIT_CONFIG_COUNT: String(rules.length), GIT_TERMINAL_PROMPT: "0" };
+  rules.forEach(([key, value], i) => {
+    env[`GIT_CONFIG_KEY_${i}`] = key;
+    env[`GIT_CONFIG_VALUE_${i}`] = value;
+  });
+  return env;
+}
+
 /** The secrets file: one `export NAME='value'` per secret, multi-line values intact. */
 export function secretsFile(secrets) {
   return Object.entries(secrets)

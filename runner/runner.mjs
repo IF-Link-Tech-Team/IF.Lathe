@@ -33,7 +33,7 @@ import { basename, dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { createGzip } from "node:zlib";
 import { redactSecrets } from "./redact.mjs";
-import { startVm, tartAvailable, vmAvailable, windowsAvailable } from "./vm.mjs";
+import { gitCredentialEnv, startVm, tartAvailable, vmAvailable, windowsAvailable } from "./vm.mjs";
 
 const BASE = (process.env.IFLINK_CI_URL ?? "http://127.0.0.1:4311").replace(/\/$/, "");
 const TOKEN = process.env.IFLINK_CI_TOKEN ?? "";
@@ -322,8 +322,10 @@ async function execute(claim, options = {}) {
   const workdir = join(WORK, job.id);
   const started = Date.now();
   const steps = [];
-  const secrets = job.secrets ?? {};
-  resetLog(Object.values(secrets));
+  // The read-only clone token for checkout.repos travels like a secret: in
+  // the guest's secrets file (or a host job's environment), masked in logs.
+  const secrets = { ...(job.secrets ?? {}), ...(job.git_token ? gitCredentialEnv(job.git_token, job.git_repos) : {}) };
+  resetLog([...Object.values(job.secrets ?? {}), ...(job.git_token ? [job.git_token] : [])]);
   const fail = async (raw) => {
     const error = redactSecrets(String(raw), masks);
     await sendChunk(job.id, `\n✗ ${error}\n`);
@@ -338,6 +340,8 @@ async function execute(claim, options = {}) {
     // run whose vault lacks one would only fail later, less clearly.
     if (job.missing_secrets?.length) return fail(`凭据库里没有这些键：${job.missing_secrets.join(", ")}`);
     if (job.secrets_withheld) await sendChunk(job.id, "这次运行不可信（PR 或非默认分支），不提供流水线的凭据。\n");
+    if (job.git_token_error) await sendChunk(job.id, `没有拿到 checkout.repos 的克隆令牌：${job.git_token_error}\n`);
+    if (job.git_token) await sendChunk(job.id, `克隆令牌（只读，1 小时）：${(job.git_repos ?? []).join(", ")}\n`);
     // The control plane does not hand a host job to a vm-only runner; this is
     // the runner's own refusal, should it ever get one.
     if (!config.vm && LABELS.split(",").map((l) => l.trim()).includes("vm-only")) return fail("这个 runner 只运行 VM 任务（vm-only），不在主机上执行");

@@ -51,8 +51,8 @@ lathe() {
 # This host's runners: one token, registered once.
 RUNNER_ENV="$ROOT/runner.env"
 if [ ! -f "$RUNNER_ENV" ]; then
-  token=$(lathe runner add "$(hostname -s)" --labels linux,x64,vm)
-  (umask 077; printf '%s\nIFLINK_CI_LABELS=linux,x64,vm\n' "$token" > "$RUNNER_ENV")
+  token=$(lathe runner add "$(hostname -s)" --labels linux,x64,vm,vm-only)
+  (umask 077; printf '%s\nIFLINK_CI_LABELS=linux,x64,vm,vm-only\n' "$token" > "$RUNNER_ENV")
 fi
 
 cat > "$UNIT_DIR/lathe.service" <<EOF

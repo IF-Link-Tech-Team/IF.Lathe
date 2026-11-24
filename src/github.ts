@@ -47,6 +47,21 @@ export async function installationToken(app: GithubCredentials, installationId: 
   return body.token;
 }
 
+/**
+ * A fresh installation token limited to some repositories of the
+ * installation's account and to reading their contents, for a job that
+ * clones them. Not cached: each job gets its own, valid for an hour.
+ */
+export async function scopedReadToken(app: GithubCredentials, installationId: string, repositories: string[], fetchImpl: typeof fetch = fetch): Promise<string> {
+  const res = await fetchImpl(`${API}/app/installations/${installationId}/access_tokens`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${appJwt(app)}`, accept: "application/vnd.github+json", "user-agent": "iflink", "content-type": "application/json" },
+    body: JSON.stringify({ repositories, permissions: { contents: "read" } }),
+  });
+  if (!res.ok) fail(502, "github_token_failed", `无法获取克隆令牌（HTTP ${res.status}）`);
+  return ((await res.json()) as any).token;
+}
+
 /** GET a GitHub API path with a token; GitHub's 404 stays a 404. */
 export async function gh(path: string, token: string, fetchImpl: typeof fetch = fetch): Promise<any> {
   const res = await fetchImpl(`${API}${path}`, {

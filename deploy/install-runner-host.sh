@@ -14,6 +14,9 @@
 # KEYS_HOME      home whose ~/.ssh/iflink-ci/key_<repo> deploy keys the runner
 #                gets, with a gh-<repo> SSH alias each (the sudo user's).
 # RUNNERS        runner processes (3).  NODE_BIN  node to copy the version of.
+# RUNNER_HOST_JOBS=1  also take jobs without `vm`, which run as the runner
+#                account on this host and can read its token; by default the
+#                runners are vm-only.
 # Idempotent: re-running upgrades everything and restarts the units.
 set -euo pipefail
 export PATH="$PATH:/usr/local/sbin:/usr/sbin:/sbin"
@@ -58,6 +61,18 @@ VM_IMAGES=/var/lib/iflink-ci-vm/images
 set_env_key "$RUNNER_ENV" IFLINK_CI_VM_IMAGE "$VM_IMAGES/current"
 grep -q '^IFLINK_CI_VM_CPUS=' "$RUNNER_ENV" || set_env_key "$RUNNER_ENV" IFLINK_CI_VM_CPUS 8
 grep -q '^IFLINK_CI_VM_MEMORY_MB=' "$RUNNER_ENV" || set_env_key "$RUNNER_ENV" IFLINK_CI_VM_MEMORY_MB 12288
+# vm-only unless asked otherwise: a job on the host runs as the runner's own
+# account, which holds the runner token. (The control plane schedules by the
+# registered labels; `lathe runner labels` or the host's sync updates them.)
+labels=$(awk -F= '$1 == "IFLINK_CI_LABELS" {print $2}' "$RUNNER_ENV")
+if [ "${RUNNER_HOST_JOBS:-0}" = 1 ]; then
+  set_env_key "$RUNNER_ENV" IFLINK_CI_LABELS "$(printf '%s' "$labels" | tr ',' '\n' | grep -vx vm-only | paste -sd, -)"
+else
+  case ",$labels," in
+    *,vm-only,*) ;;
+    *) set_env_key "$RUNNER_ENV" IFLINK_CI_LABELS "${labels:+$labels,}vm-only" ;;
+  esac
+fi
 
 # Runner account, its own node (the owner's may sit in a home directory the
 # sandbox hides), and the runner script outside the app tree.

@@ -61,7 +61,7 @@ export function createLatheServer(db: DB, options: ServerOptions): Server {
         const body = await readJson(req);
         switch (route) {
           case "claim":
-            return send(res, 200, claimAndReport(db, runner));
+            return send(res, 200, await claimAndReport(db, runner));
           case "heartbeat":
             return send(res, 200, heartbeat(db, runner.id, body.job_id ? String(body.job_id) : undefined));
           case "log":

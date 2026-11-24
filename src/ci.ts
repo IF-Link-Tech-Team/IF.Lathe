@@ -251,6 +251,13 @@ export interface CheckoutConfig {
   depth?: number;
   /** Also clone submodules (recursively). */
   submodules?: boolean;
+  /**
+   * `owner/name` repositories the job's own steps clone (private
+   * dependencies). A trusted run gets a GitHub App token that can only read
+   * these, valid an hour, and git inside the job uses it for their
+   * `https://github.com/…`, `git@github.com:…` and `git@gh-<name>:…` URLs.
+   */
+  repos?: string[];
 }
 
 const DEFAULT_STEPS: PipelineStep[] = [
@@ -360,6 +367,10 @@ function parseCheckoutConfig(raw: any): CheckoutConfig | undefined {
   const depth = Number(raw.depth);
   if (raw.depth !== undefined && Number.isInteger(depth) && depth >= 0) out.depth = depth;
   if (raw.submodules === true) out.submodules = true;
+  if (Array.isArray(raw.repos)) {
+    const repos = [...new Set(raw.repos.map(String).filter((r: string) => /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(r)))].slice(0, 100) as string[];
+    if (repos.length) out.repos = repos;
+  }
   return Object.keys(out).length ? out : undefined;
 }
 

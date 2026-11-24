@@ -8,9 +8,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { docAudits, pipelinesFromDoc } from "../src/apply.ts";
+// @ts-expect-error plain JavaScript module without types
+import { gitCredentialEnv } from "../runner/vm.mjs";
 import { claimJob, registerRunner, runDetail, startRun, upsertPipeline } from "../src/ci.ts";
 import { parseSchedule } from "../src/cron.ts";
 import { hooks } from "../src/hooks.ts";
+import { claimAndReport } from "../src/protocol.ts";
 import { createLatheServer } from "../src/server.ts";
 import { ensureProject, listSecrets, openLathe, resolveSecret, seal, setGithubApp, setSecret, unseal } from "../src/standalone.ts";
 
@@ -161,4 +164,39 @@ test("a vm-only runner gets VM jobs and never a job for its host", async () => {
   assert.equal(claimJob(db, runner), null);
   assert.equal(runDetail(db, project.id, hostRun.run_id).status, "queued");
   db.prepare("UPDATE ci_jobs SET status = 'cancelled' WHERE run_id = ?").run(hostRun.run_id);
+});
+
+test("checkout.repos: a trusted run gets a token that reads only those repositories; a PR run gets none", async () => {
+  const project = ensureProject(db);
+  const pipeline = upsertPipeline(db, project.id, {
+    name: "repo/deps",
+    repo: origin,
+    config: { branch: "main", checkout: { repos: ["acme/dep-one", "acme/dep-two", "not a repo"] }, steps: [{ run: "true" }] },
+  });
+  const requests: any[] = [];
+  const fakeGithub = (async (url: string, init: any = {}) => {
+    requests.push({ url, body: init.body ? JSON.parse(init.body) : null });
+    return Response.json({ token: "ghs_scoped_token", expires_at: new Date(Date.now() + 3_600_000).toISOString() }, { status: 201 });
+  }) as typeof fetch;
+  const runner = { id: registerRunner(db, { name: "deps", labels: [] }).id, labels: "" };
+
+  startRun(db, pipeline.id, { trigger: "manual", ref: "main" });
+  const trusted: any = await claimAndReport(db, runner, fakeGithub);
+  assert.equal(trusted.job.git_token, "ghs_scoped_token");
+  assert.deepEqual(trusted.job.git_repos, ["acme/dep-one", "acme/dep-two"]);
+  const tokenRequest = requests.find((r) => r.url.endsWith("/installations/7/access_tokens"));
+  assert.deepEqual(tokenRequest.body, { repositories: ["dep-one", "dep-two"], permissions: { contents: "read" } });
+
+  startRun(db, pipeline.id, { trigger: "pull_request", ref: "refs/pull/3/merge" });
+  const untrusted: any = await claimAndReport(db, runner, fakeGithub);
+  assert.equal(untrusted.job.git_token, undefined);
+  assert.match(untrusted.job.git_token_error, /不可信/);
+  db.prepare("UPDATE ci_jobs SET status = 'cancelled' WHERE status = 'running'").run();
+
+  const env = gitCredentialEnv("ghs_scoped_token", ["acme/dep-one"]);
+  assert.equal(env.GIT_CONFIG_COUNT, "4");
+  const rules = Array.from({ length: 4 }, (_, i) => [env[`GIT_CONFIG_KEY_${i}`], env[`GIT_CONFIG_VALUE_${i}`]]);
+  assert.ok(rules.every(([key]) => key === "url.https://x-access-token:ghs_scoped_token@github.com/acme/dep-one.insteadOf"));
+  assert.deepEqual(rules.map(([, v]) => v), ["https://github.com/acme/dep-one", "git@github.com:acme/dep-one", "ssh://git@github.com/acme/dep-one", "git@gh-dep-one:acme/dep-one"]);
+  assert.deepEqual(gitCredentialEnv("", ["acme/dep-one"]), {});
 });

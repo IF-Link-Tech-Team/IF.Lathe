@@ -123,7 +123,7 @@ One JSON file per repository; `lathe pipelines apply <file|dir>` registers them
 | `status` | check name on GitHub (default: the part of `name` after `/`) |
 | `environment` | `{ name, url? }`: each trusted run is a GitHub deployment |
 | `code_scanning` | upload the run's `.sarif` artifacts to code scanning |
-| `checkout` | `{ depth, submodules }` |
+| `checkout` | `{ depth, submodules, repos }`; `repos` lists `owner/name` repositories the steps clone themselves (private dependencies): a trusted run gets a GitHub App token that can only read those, for an hour, and git in the job uses it for their https, ssh and `gh-<name>` URLs |
 
 Private repositories: put a read-only deploy key for each in
 `~/.ssh/iflink-ci/key_<name>` of the installing user. The installer copies it
@@ -193,8 +193,9 @@ Runner (`runner.env`): `IFLINK_CI_URL`, `IFLINK_CI_TOKEN`, `IFLINK_CI_LABELS`,
   user (tart needs a GUI session). Register its runner with
   `--labels vm-macos,vm-only`.
 - **`vm-only`**: a runner with this label is never given a job without `vm`,
-  so nothing runs on its host. Use it for any runner on a machine people work
-  on; without it, a runner also takes jobs that run directly on its host.
+  so nothing runs on its host. The installers set it by default; a job on the
+  host would run as the runner's account and could read the runner's token.
+  `RUNNER_HOST_JOBS=1 install-runner-host.sh` drops it.
 
 ## Embedding
 
