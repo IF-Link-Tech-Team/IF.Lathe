@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Unattended install of the CI job image: Windows Server 2025 Standard
+  Evaluation, Server Core, on an AHCI disk with an e1000e NIC (both have inbox
+  drivers). deploy/build-windows-image.sh fills in the build's own
+  Administrator password; setup.ps1 runs at the one automatic logon and powers
+  the VM off when the image is ready.
+-->
+<unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+  <settings pass="windowsPE">
+    <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <SetupUILanguage><UILanguage>en-US</UILanguage></SetupUILanguage>
+      <InputLocale>en-US</InputLocale>
+      <SystemLocale>en-US</SystemLocale>
+      <UILanguage>en-US</UILanguage>
+      <UserLocale>en-US</UserLocale>
+    </component>
+    <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <DiskConfiguration>
+        <Disk wcm:action="add">
+          <DiskID>0</DiskID>
+          <WillWipeDisk>true</WillWipeDisk>
+          <CreatePartitions>
+            <CreatePartition wcm:action="add"><Order>1</Order><Type>Primary</Type><Extend>true</Extend></CreatePartition>
+          </CreatePartitions>
+          <ModifyPartitions>
+            <ModifyPartition wcm:action="add"><Order>1</Order><PartitionID>1</PartitionID><Format>NTFS</Format><Label>Windows</Label><Letter>C</Letter><Active>true</Active></ModifyPartition>
+          </ModifyPartitions>
+        </Disk>
+      </DiskConfiguration>
+      <ImageInstall>
+        <OSImage>
+          <InstallFrom>
+            <MetaData wcm:action="add"><Key>/IMAGE/NAME</Key><Value>Windows Server 2025 SERVERSTANDARDCORE</Value></MetaData>
+          </InstallFrom>
+          <InstallTo><DiskID>0</DiskID><PartitionID>1</PartitionID></InstallTo>
+        </OSImage>
+      </ImageInstall>
+      <UserData>
+        <AcceptEula>true</AcceptEula>
+        <FullName>CI</FullName>
+        <Organization>CI</Organization>
+      </UserData>
+    </component>
+  </settings>
+  <settings pass="specialize">
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <ComputerName>ci</ComputerName>
+      <TimeZone>UTC</TimeZone>
+    </component>
+    <component name="Microsoft-Windows-TerminalServices-LocalSessionManager" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <fDenyTSConnections>true</fDenyTSConnections>
+    </component>
+  </settings>
+  <settings pass="oobeSystem">
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <UserAccounts>
+        <AdministratorPassword><Value>@ADMIN_PASSWORD@</Value><PlainText>true</PlainText></AdministratorPassword>
+      </UserAccounts>
+      <AutoLogon>
+        <Enabled>true</Enabled>
+        <LogonCount>1</LogonCount>
+        <Username>Administrator</Username>
+        <Password><Value>@ADMIN_PASSWORD@</Value><PlainText>true</PlainText></Password>
+      </AutoLogon>
+      <OOBE>
+        <HideEULAPage>true</HideEULAPage>
+        <ProtectYourPC>3</ProtectYourPC>
+      </OOBE>
+      <FirstLogonCommands>
+        <SynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <CommandLine>powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "&amp; ((Get-Volume | Where-Object FileSystemLabel -eq 'CIBUILD' | Select-Object -First 1).DriveLetter + ':\setup.ps1')"</CommandLine>
+          <Description>Provision the CI image</Description>
+        </SynchronousCommand>
+      </FirstLogonCommands>
+    </component>
+  </settings>
+</unattend>

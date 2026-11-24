@@ -1,0 +1,27 @@
+{
+  "name": "@iflink/lathe",
+  "version": "0.1.0",
+  "description": "Self-hosted CI for GitHub: a VM per job (Linux, macOS, Windows), results as GitHub checks, LLM review",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./github": "./src/github.ts",
+    "./watch": "./src/watch.ts",
+    "./apply": "./src/apply.ts"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "lathe": "./bin/lathe.mjs"
+  },
+  "scripts": {
+    "test": "node --test \"tests/*.test.ts\"",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^5.9.3"
+  }
+}

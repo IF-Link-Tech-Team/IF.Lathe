@@ -1,0 +1,15 @@
+[Unit]
+Description=CI job VM setup: the runner's login key and this VM's host key
+After=systemd-udevd.service local-fs.target
+Before=ssh.service
+FailureAction=poweroff-force
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/libexec/iflink-ci-guest-setup
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

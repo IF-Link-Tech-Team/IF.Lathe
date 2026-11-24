@@ -1,0 +1,20 @@
+# Docker Hub pull-through cache for the CI job VMs (distribution's registry
+# in proxy mode), installed by deploy/install-ci.sh. Every job VM starts
+# with no images, and Docker Hub allows an address about 100 anonymous pulls
+# in six hours; with this cache each image is pulled once and kept a week.
+# The job VMs reach it at QEMU's host address through the registry mirror in
+# their Docker config (images/linux/guest/docker-daemon.json).
+version: 0.1
+log:
+  level: warn
+  formatter: text
+storage:
+  filesystem:
+    rootdirectory: /var/cache/iflink-ci-registry
+  delete:
+    enabled: true
+http:
+  addr: 127.0.0.1:4381
+proxy:
+  remoteurl: https://registry-1.docker.io
+  ttl: 168h

@@ -1,0 +1,11 @@
+# QEMU's user network: the guest's fixed address (the runner's SSH forward
+# points here), the host's gateway at 10.0.2.2 and its DNS at 10.0.2.3.
+[Match]
+Name=eth0
+
+[Network]
+Address=10.0.2.15/24
+Gateway=10.0.2.2
+DNS=10.0.2.3
+LinkLocalAddressing=no
+IPv6AcceptRA=no

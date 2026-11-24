@@ -1,0 +1,3 @@
+# A job may install what it needs: the VM is its boundary, and its disk is
+# thrown away when the job ends.
+ci ALL=(ALL) NOPASSWD:ALL

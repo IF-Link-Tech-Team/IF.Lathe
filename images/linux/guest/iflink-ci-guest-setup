@@ -1,0 +1,17 @@
+#!/bin/sh
+# Readies a CI job VM on each boot, as root: the runner's login key for the ci
+# user and this VM's SSH host key, both made for this one job and handed over
+# through QEMU's firmware config.
+set -eu
+modprobe qemu_fw_cfg 2>/dev/null || true
+fw=/sys/firmware/qemu_fw_cfg/by_name/opt/iflink
+for item in authorized_key host_key; do
+    [ -r "$fw/$item/raw" ] || { echo "iflink-ci-guest-setup: no $item in the firmware config" >&2; exit 1; }
+done
+install -d -m 0700 -o ci -g ci /home/ci/.ssh
+cat "$fw/authorized_key/raw" > /home/ci/.ssh/authorized_keys
+chown ci:ci /home/ci/.ssh/authorized_keys
+chmod 0600 /home/ci/.ssh/authorized_keys
+(umask 077 && cat "$fw/host_key/raw" > /etc/ssh/ssh_host_ed25519_key)
+ssh-keygen -y -f /etc/ssh/ssh_host_ed25519_key > /etc/ssh/ssh_host_ed25519_key.pub
+install -d -m 0755 -o ci -g ci /home/ci/work /home/ci/tmp

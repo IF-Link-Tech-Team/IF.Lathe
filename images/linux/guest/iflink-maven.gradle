@@ -1,0 +1,25 @@
+// Job VMs fetch Maven Central through the build host's cache
+// (caches/maven-cache.mjs at QEMU's host address), which keeps one copy of each
+// artifact and draws from Google's Maven Central mirror. Every fresh VM
+// downloading the same artifacts straight from Maven Central got the build
+// host's address answered with 429 for a day.
+def cache = System.getenv('IFLINK_MAVEN_CACHE') ?: 'http://10.0.2.2:4380/maven2/'
+def central = ['https://repo.maven.apache.org/maven2', 'https://repo1.maven.org/maven2']
+def redirect = { RepositoryHandler repos ->
+  repos.withType(MavenArtifactRepository).configureEach { repo ->
+    if (central.contains(repo.url.toString().replaceAll('/+$', ''))) {
+      repo.url = cache
+      repo.allowInsecureProtocol = true
+    }
+  }
+}
+beforeSettings { settings ->
+  redirect(settings.pluginManagement.repositories)
+  redirect(settings.dependencyResolutionManagement.repositories)
+}
+allprojects {
+  buildscript { redirect(repositories) }
+  redirect(repositories)
+  // Robolectric fetches its Android runtime jars itself at test time.
+  tasks.withType(Test).configureEach { systemProperty 'robolectric.dependency.repo.url', cache }
+}

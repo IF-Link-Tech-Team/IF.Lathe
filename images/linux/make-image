@@ -1,0 +1,21 @@
+#!/bin/sh
+# Turns the CI VM image's filesystem (`docker export` on stdin) into what a job
+# VM boots: vmlinuz, initrd.img and an ext4 root.img in /out. Runs as root in a
+# container of that image, so the files inside keep their owners.
+set -eu
+root=/tmp/root
+mkdir "$root"
+tar -x -C "$root" --numeric-owner
+rm -f "$root/.dockerenv"
+# Docker mounts these over the image's own; the VM gets QEMU's user network
+# (DNS at 10.0.2.3) and its own name.
+printf 'nameserver 10.0.2.3\n' > "$root/etc/resolv.conf"
+echo ci > "$root/etc/hostname"
+printf '127.0.0.1 localhost\n127.0.1.1 ci\n::1 localhost\n' > "$root/etc/hosts"
+set -- "$root"/boot/vmlinuz-*
+[ $# -eq 1 ] || { echo "make-image: expected one kernel in /boot, found $#" >&2; exit 1; }
+cp "$1" /out/vmlinuz
+cp "$root"/boot/initrd.img-"${1##*/vmlinuz-}" /out/initrd.img
+# Sparse: a job's overlay can grow to this, the file only to what is written.
+mke2fs -q -t ext4 -L iflink-ci-root -d "$root" -E root_owner=0:0 /out/root.img 48G
+chmod 0644 /out/vmlinuz /out/initrd.img /out/root.img
