@@ -158,6 +158,7 @@ lathe secret set <KEY> < value        vault value (read from stdin, never from a
 lathe secret list
 lathe github-app set --app-id N --installation N --key app.pem
 lathe watch [--dry-run]               one watcher pass
+lathe health [--optional-runner N]    the CI's own health as JSON: watcher, runners, queue, disk (exit 1 if a check fails)
 ```
 
 ## Settings
